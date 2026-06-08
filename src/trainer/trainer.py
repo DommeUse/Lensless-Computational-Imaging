@@ -3,15 +3,16 @@ import torch
 from src.metrics.tracker import MetricTracker
 from src.trainer.base_trainer import BaseTrainer
 
+from lensless_helpers.preprocessor import get_roi
 
 class Trainer(BaseTrainer):
     """
     Trainer class. Defines the logic of batch logging and processing.
     """
 
-    def process_batch(self, batch):
+    def process_batch(self, batch, metrics: MetricTracker):
         """
-        Run batch through the model, compute loss,
+        Run batch through the model, compute metrics, compute loss,
         and do training step (during training stage).
 
         The function expects that criterion aggregates all losses
@@ -20,49 +21,44 @@ class Trainer(BaseTrainer):
         Args:
             batch (dict): dict-based batch containing the data from
                 the dataloader.
+            metrics (MetricTracker): MetricTracker object that computes
+                and aggregates the metrics. The metrics depend on the type of
+                the partition (train or inference).
         Returns:
             batch (dict): dict-based batch containing the data from
                 the dataloader (possibly transformed via batch transform),
                 model outputs, and losses.
         """
         batch = self.move_batch_to_device(batch)
-        batch = self.transform_batch(batch)  # transform batch on device -- faster
+        batch = self.transform_batch(batch)
+
+        metric_funcs = self.metrics["inference"] if not self.is_train else self.metrics["train"]
+
+        outputs = self.model(**batch)
+        batch.update(outputs)
+
+        batch["output"] = get_roi(batch["output"])
+        batch["lensed"] = get_roi(batch["lensed"])
+
+        all_losses = self.criterion(**batch)
+        batch.update(all_losses)
 
         if self.is_train:
-            with self.accelerator.accumulate(self.model):
-                outputs = self.model(**batch)
-                batch.update(outputs)
+            self.optimizer.zero_grad()
+            batch["loss"].backward()
+            self._clip_grad_norm()
+            self.optimizer.step()
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step()
 
-                all_losses = self.criterion(**batch)
-                batch.update(all_losses)
+        # update metrics for each loss (in case of multiple losses)
+        for loss_name in self.config.writer.loss_names:
+            if loss_name in batch:
+                metrics.update(loss_name, batch[loss_name].item())
 
-                # sum of all losses is always called loss
-                grad_norm = None
-                self.accelerator.backward(batch["loss"])
-                if self.accelerator.sync_gradients:
-                    grad_norm = self._get_grad_norm()
-                    self._clip_grad_norm()
-                    self.optimizer.step()
-                    optimizer_step_was_skipped = (
-                        self.accelerator.optimizer_step_was_skipped
-                    )
-                    if self.lr_scheduler is not None and not optimizer_step_was_skipped:
-                        self.lr_scheduler.step()
-                    self.optimizer.zero_grad()
-
-                # control actual updates
-                optimizer_did_step = self.accelerator.sync_gradients
-        else:
-            outputs = self.model(**batch)
-            batch.update(outputs)
-
-            all_losses = self.criterion(**batch)
-            batch.update(all_losses)
-
-            optimizer_did_step = None
-            grad_norm = None
-
-        return batch, optimizer_did_step, grad_norm
+        for met in metric_funcs:
+            metrics.update(met.name, met(**batch))
+        return batch
 
     def _log_batch(self, batch_idx, batch, mode="train"):
         """
@@ -79,10 +75,17 @@ class Trainer(BaseTrainer):
         # method to log data from you batch
         # such as audio, text or images, for example
 
+        if self.writer == None:
+            return
+
+        lensed = batch["lensed"][0].detach().cpu().numpy().transpose(1, 2, 0)
+        output = batch["output"][0].detach().cpu().numpy().transpose(1, 2, 0)
+
+        self.writer.add_image("lensed", lensed)
+        self.writer.add_image("output", output)
+
         # logging scheme might be different for different partitions
         if mode == "train":  # the method is called only every self.log_step steps
-            img = batch["img"][0].detach().cpu().numpy().transpose(1, 2, 0)
-            self.writer.add_image("image", img)
+            pass
         else:
-            img = batch["img"][0].detach().cpu().numpy().transpose(1, 2, 0)
-            self.writer.add_image("image", img)
+            pass
