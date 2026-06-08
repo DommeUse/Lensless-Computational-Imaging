@@ -1,319 +1,470 @@
-import os
+import torch
 import numpy as np
-from scipy.ndimage import rotate as rotate_func
-
-from lensless_helpers.utils import get_ctypes
-from slm_controller.hardware import SLMParam, slm_devices
-
+import cv2
+import os
 
 try:
     import torch
-    from torchvision import transforms
-    from torchvision.transforms.functional import InterpolationMode
+    import torchvision.transforms as tf
+    from torchvision.transforms.functional import rgb_to_grayscale, rotate
 
     torch_available = True
 except ImportError:
     torch_available = False
 
-try:
-    from waveprop.spherical import spherical_prop
-    from waveprop.color import ColorSystem
-    from waveprop.rs import angular_spectrum
-    from waveprop.slm import get_centers
-    from waveprop.devices import SLMParam as SLMParam_wp
 
-    waveprop_available = True
-except ImportError:
-    waveprop_available = False
-
-
-SUPPORTED_DEVICE = {
-    "adafruit": "~/slm-controller/examples/adafruit_slm.py",
-    "nokia": "~/slm-controller/examples/nokia_slm.py",
-    "holoeye": "~/slm-controller/examples/holoeye_slm.py",
-}
+RPI_HQ_CAMERA_CCM_MATRIX = np.array(
+    [
+        [2.0659, -0.93119, -0.13421],
+        [-0.11615, 1.5593, -0.44314],
+        [0.073694, -0.4368, 1.3636],
+    ]
+)
+RPI_HQ_CAMERA_BLACK_LEVEL = 256.3
+SUPPORTED_BIT_DEPTH = np.array([8, 10, 12, 16])
+FLOAT_DTYPES = [np.float32, np.float64]
 
 
-def get_programmable_mask(
-    vals, sensor, slm_param, rotate=None, flipud=False, nbits=8, color_filter=None, deadspace=True
-):
+def rgb2gray(rgb, weights=None, keepchanneldim=True):
     """
-    Get mask as a numpy or torch array. Return same type.
+    Convert RGB array to grayscale.
 
     Parameters
     ----------
-    vals : :py:class:`~numpy.ndarray` or :py:class:`~torch.Tensor`
-        Values to set on programmable mask.
-    sensor : :py:class:`~lensless.hardware.sensor.VirtualSensor`
-        Sensor object.
-    slm_param : dict
-        SLM parameters.
-    rotate : float, optional
-        Rotation angle in degrees.
-    flipud : bool, optional
-        Flip mask vertically.
-    nbits : int, optional
-        Number of bits/levels to quantize mask to.
-    deadspace: bool, optional
-        Whether to include deadspace around mask. Default is True.
+    rgb : :py:class:`~numpy.ndarray` or :py:class:`~torch.Tensor`
+        ([Depth,] Height, Width, Channel) image.
+    weights : :py:class:`~numpy.ndarray`
+        [Optional] (3,) weights to convert from RGB to grayscale. Only used for NumPy arrays.
+    keepchanneldim : bool
+        Whether to keep the channel dimension. Default is True.
+
+    Returns
+    -------
+    img :py:class:`~numpy.ndarray`
+        Grayscale image of dimension ([depth,] height, width [, 1]).
 
     """
-
-    assert waveprop_available
 
     use_torch = False
     if torch_available:
-        use_torch = isinstance(vals, torch.Tensor)
-    dtype = vals.dtype
+        if torch.is_tensor(rgb):
+            use_torch = True
 
-    # -- prepare SLM mask
-    n_active_slm_pixels = vals.shape
-    n_color_filter = np.prod(slm_param["color_filter"].shape[:2])
-
-    # -- prepare color filter
-    if color_filter is None and SLMParam_wp.COLOR_FILTER in slm_param.keys():
-        color_filter = slm_param[SLMParam_wp.COLOR_FILTER]
-        if isinstance(vals, torch.Tensor):
-            color_filter = torch.tensor(color_filter).to(vals)
-
-    if color_filter is not None:
-
-        if isinstance(color_filter, np.ndarray):
-            if flipud:
-                color_filter = np.flipud(color_filter)
-        elif isinstance(color_filter, torch.Tensor):
-            if flipud:
-                color_filter = torch.flip(color_filter, dims=(0,))
-        else:
-            raise ValueError("color_filter must be numpy array or torch tensor")
-
-    # -- prepare mask
     if use_torch:
-        mask = torch.zeros((n_color_filter,) + tuple(sensor.resolution)).to(vals)
-        slm_vals_flat = vals.flatten()
-    else:
-        mask = np.zeros((n_color_filter,) + tuple(sensor.resolution), dtype=dtype)
-        slm_vals_flat = vals.reshape(-1)
-    pixel_pitch = slm_param[SLMParam_wp.PITCH]
-    d1 = sensor.pitch
-    if deadspace:
 
-        centers = get_centers(n_active_slm_pixels, pixel_pitch=pixel_pitch)
+        # move channel dimension to third to last
+        if len(rgb.shape) == 4:
+            rgb = rgb.permute(0, 3, 1, 2)
+        elif len(rgb.shape) == 3:
+            rgb = rgb.permute(2, 0, 1)
+        else:
+            raise ValueError("Input must be at least 3D.")
 
-        _height_pixel, _width_pixel = (slm_param[SLMParam_wp.CELL_SIZE] / d1).astype(int)
+        image = rgb_to_grayscale(rgb)
 
-        for i, _center in enumerate(centers):
+        # move channel dimension to last
+        if len(rgb.shape) == 4:
+            image = image.permute(0, 2, 3, 1)
+        elif len(rgb.shape) == 3:
+            image = image.permute(1, 2, 0)
 
-            _center_pixel = (_center / d1 + sensor.resolution / 2).astype(int)
-            _center_top_left_pixel = (
-                _center_pixel[0] - np.floor(_height_pixel / 2).astype(int),
-                _center_pixel[1] + 1 - np.floor(_width_pixel / 2).astype(int),
-            )
-            color_filter_idx = i // n_active_slm_pixels[1] % n_color_filter
+        if not keepchanneldim:
+            image = image.squeeze(-1)
 
-            mask_val = slm_vals_flat[i] * color_filter[color_filter_idx][0]
-            if isinstance(mask_val, np.ndarray):
-                mask_val = mask_val[:, np.newaxis, np.newaxis]
-            elif isinstance(mask_val, torch.Tensor):
-                mask_val = mask_val.unsqueeze(-1).unsqueeze(-1)
-            mask[
-                :,
-                _center_top_left_pixel[0] : _center_top_left_pixel[0] + _height_pixel,
-                _center_top_left_pixel[1] : _center_top_left_pixel[1] + _width_pixel,
-            ] = mask_val
+        return image
 
     else:
 
-        # use color filter to turn mask into RGB
-        if use_torch:
-            active_mask_rgb = torch.zeros((n_color_filter,) + n_active_slm_pixels).to(vals)
+        if weights is None:
+            weights = np.array([0.299, 0.587, 0.114])
+        assert len(weights) == 3
+
+        if len(rgb.shape) == 4:
+            image = np.tensordot(rgb, weights, axes=((3,), 0))
+        elif len(rgb.shape) == 3:
+            image = np.tensordot(rgb, weights, axes=((2,), 0))
         else:
-            active_mask_rgb = np.zeros((n_color_filter,) + n_active_slm_pixels, dtype=dtype)
+            raise ValueError("Input must be at least 3D.")
 
-        # TODO avoid for loop
-        for i in range(n_active_slm_pixels[0]):
-            row_idx = i % color_filter.shape[0]
-            for j in range(n_active_slm_pixels[1]):
-
-                col_idx = j % color_filter.shape[1]
-                color_filter_idx = color_filter[row_idx, col_idx]
-                active_mask_rgb[
-                    :, n_active_slm_pixels[0] - i - 1, n_active_slm_pixels[1] - j - 1
-                ] = (vals[i, j] * color_filter_idx)
-
-        # size of active pixels in pixels
-        n_active_dim = np.around(slm_param[SLMParam_wp.PITCH] * n_active_slm_pixels / d1).astype(
-            int
-        )
-        # n_active_dim = np.around(slm_param[SLMParam_wp.CELL_SIZE] * n_active_slm_pixels / d1).astype(int)
-
-        # resize to n_active_dim
-        if use_torch:
-            mask_active = transforms.functional.resize(
-                active_mask_rgb, n_active_dim, interpolation=InterpolationMode.NEAREST
-            )
+        if keepchanneldim:
+            return image[..., np.newaxis]
         else:
-            # TODO check
-            mask_active = np.zeros((n_color_filter,) + tuple(n_active_dim), dtype=dtype)
-            for i in range(n_color_filter):
-                mask_active[i] = np.resize(active_mask_rgb[i], n_active_dim)
+            return image
+        
 
-        # pad to full mask
-        top_left = (sensor.resolution - n_active_dim) // 2
-        mask[
-            :,
-            top_left[0] : top_left[0] + n_active_dim[0],
-            top_left[1] : top_left[1] + n_active_dim[1],
-        ] = mask_active
-
-    # # quantize mask
-    # if use_torch:
-    #     mask = mask / torch.max(mask)
-    #     mask = torch.round(mask * (2**nbits - 1)) / (2**nbits - 1)
-    # else:
-    #     mask = mask / np.max(mask)
-    #     mask = np.round(mask * (2**nbits - 1)) / (2**nbits - 1)
-
-    # rotate
-    if rotate is not None:
-        if use_torch:
-            mask = transforms.functional.rotate(mask, angle=rotate)
-        else:
-            mask = rotate_func(mask, axes=(2, 1), angle=rotate, reshape=False)
-
-    return mask
-
-
-def adafruit_sub2full(
-    subpattern,
-    center,
-):
-    sub_shape = subpattern.shape
-    controllable_shape = (3, sub_shape[0] // 3, sub_shape[1])
-    subpattern_rgb = subpattern.reshape(controllable_shape, order="F")
-    subpattern_rgb *= 255
-
-    # pad to full pattern
-    pattern = np.zeros((3, 128, 160), dtype=np.uint8)
-    top_left = [center[0] - controllable_shape[1] // 2, center[1] - controllable_shape[2] // 2]
-    pattern[
-        :,
-        top_left[0] : top_left[0] + controllable_shape[1],
-        top_left[1] : top_left[1] + controllable_shape[2],
-    ] = subpattern_rgb.astype(np.uint8)
-    return pattern
-
-
-def full2subpattern(
-    pattern,
-    shape,
-    center,
-    slm=None,
-):
-    shape = np.array(shape)
-    center = np.array(center)
-
-    # extract region
-    idx_1 = center[0] - shape[0] // 2
-    idx_2 = center[1] - shape[1] // 2
-    subpattern = pattern[:, idx_1 : idx_1 + shape[0], idx_2 : idx_2 + shape[1]]
-    subpattern = subpattern / 255.0
-    if slm == "adafruit":
-        # flatten color channel along rows
-        subpattern = subpattern.reshape((-1, subpattern.shape[-1]), order="F")
-    return subpattern
-
-
-def get_intensity_psf(
-    mask,
-    waveprop=False,
-    sensor=None,
-    scene2mask=None,
-    mask2sensor=None,
-    color_system=None,
+def load_image(
+    fp,
+    verbose=False,
+    flip=False,
+    flip_ud=False,
+    flip_lr=False,
+    bayer=False,
+    black_level=RPI_HQ_CAMERA_BLACK_LEVEL,
+    blue_gain=None,
+    red_gain=None,
+    ccm=RPI_HQ_CAMERA_CCM_MATRIX,
+    back=None,
+    nbits_out=None,
+    as_4d=False,
+    downsample=None,
+    bg=None,
+    return_float=False,
+    shape=None,
+    dtype=None,
+    normalize=True,
+    bgr_input=True,
 ):
     """
-    Get intensity PSF from mask pattern. Return same type of data.
+    Load image as numpy array.
 
     Parameters
     ----------
-    mask : :py:class:`~numpy.ndarray` or :py:class:`~torch.Tensor`
-        Mask pattern.
-    waveprop : bool, optional
-        Whether to use wave propagation to compute PSF. Default is False,
-        namely to return squared intensity of mask pattern as the PSF (i.e.,
-        no wave propagation and just shadow of pattern).
-    sensor : :py:class:`~lensless.hardware.sensor.VirtualSensor`
-        Sensor object. Not used if ``waveprop=False``.
-    scene2mask : float
-        Distance from scene to mask. Not used if ``waveprop=False``.
-    mask2sensor : float
-        Distance from mask to sensor. Not used if ``waveprop=False``.
-    color_system : :py:class:`~waveprop.color.ColorSystem`, optional
-        Color system. Not used if ``waveprop=False``.
+    fp : str
+        Full path to file.
+    verbose : bool, optional
+        Whether to plot into about file.
+    flip : bool
+        Whether to flip data (vertical and horizontal).
+    bayer : bool
+        Whether input data is Bayer.
+    blue_gain : float
+        Blue gain for color correction.
+    red_gain : float
+        Red gain for color correction.
+    black_level : float
+        Black level. Default is to use that of Raspberry Pi HQ camera.
+    ccm : :py:class:`~numpy.ndarray`
+        Color correction matrix. Default is to use that of Raspberry Pi HQ camera.
+    back : array_like
+        Background level to subtract.
+    nbits_out : int
+        Output bit depth. Default is to use that of input.
+    as_4d : bool
+        Add depth and color dimensions if necessary so that image is 4D: (depth,
+        height, width, color).
+    downsample : int, optional
+        Downsampling factor. Recommended for image reconstruction.
+    bg : array_like
+        Background level to subtract.
+    return_float : bool
+        Whether to return image as float array, or unsigned int.
+    shape : tuple, optional
+        Shape (H, W, C) to resize to.
+    dtype : str, optional
+        Data type of returned data. Default is to use that of input.
+    normalize : bool, default True
+        If ``return_float``, whether to normalize data to maximum value of 1.
 
+    Returns
+    -------
+    img : :py:class:`~numpy.ndarray`
+        RGB image of dimension (height, width, 3).
     """
-    assert waveprop_available
+    assert os.path.isfile(fp)
 
-    if color_system is None:
-        color_system = ColorSystem.rgb()
+    nbits = None  # input bit depth
+    if "dng" in fp:
+        import rawpy
 
-    is_torch = False
-    device = None
-    if torch_available and isinstance(mask, torch.Tensor):
-        is_torch = True
-        device = mask.device
+        assert bayer
+        raw = rawpy.imread(fp)
+        img = raw.raw_image
+        # # # TODO : use raw.postprocess? to much unknown processing...
+        # img = raw.postprocess(
+        #     adjust_maximum_thr=0,  # default 0.75
+        #     no_auto_scale=False,
+        #     # no_auto_scale=True,
+        #     gamma=(1, 1),
+        #     bright=1,  # default 1
+        #     exp_shift=1,
+        #     no_auto_bright=True,
+        #     # use_camera_wb=True,
+        #     # use_auto_wb=False,
+        #     # -- gives better balance for PSF measurement
+        #     use_camera_wb=False,
+        #     use_auto_wb=True,  # default is False? f both use_camera_wb and use_auto_wb are True, then use_auto_wb has priority.
+        # )
 
-    dtype = mask.dtype
-    ctype, _ = get_ctypes(dtype, is_torch)
+        # if red_gain is None or blue_gain is None:
+        #     camera_wb = raw.camera_whitebalance
+        #     red_gain = camera_wb[0]
+        #     blue_gain = camera_wb[1]
 
-    if is_torch:
-        psfs = torch.zeros(mask.shape, dtype=ctype, device=device)
+        nbits = int(np.ceil(np.log2(raw.white_level)))
+        ccm = raw.color_matrix[:, :3]
+        black_level = np.array(raw.black_level_per_channel[:3]).astype(np.float32)
+    elif "npy" in fp or "npz" in fp:
+        img = np.load(fp)
     else:
-        psfs = np.zeros(mask.shape, dtype=ctype)
+        img = cv2.imread(fp, cv2.IMREAD_UNCHANGED)
 
-    if waveprop:
+    if bayer:
+        assert len(img.shape) == 2, img.shape
+        if nbits is None:
+            if img.max() > 255:
+                # HQ camera
+                nbits = 12
+            else:
+                nbits = 8
 
-        assert sensor is not None, "sensor must be specified"
-        assert scene2mask is not None, "scene2mask must be specified"
-        assert mask2sensor is not None, "mask2sensor must be specified"
+        if back:
+            back_img = cv2.imread(back, cv2.IMREAD_UNCHANGED)
+            dtype = img.dtype
+            img = img.astype(np.float32) - back_img.astype(np.float32)
+            img = np.clip(img, a_min=0, a_max=img.max())
+            img = img.astype(dtype)
+        if nbits_out is None:
+            nbits_out = nbits
 
-        assert (
-            len(color_system.wv) == mask.shape[0]
-        ), "Number of wavelengths must match number of color channels"
-
-        # spherical wavefronts to mask
-        spherical_wavefront = spherical_prop(
-            in_shape=sensor.resolution,
-            d1=sensor.pitch,
-            wv=color_system.wv,
-            dz=scene2mask,
-            return_psf=True,
-            is_torch=is_torch,
-            device=device,
-            dtype=dtype,
+        img = bayer2rgb_cc(
+            img,
+            nbits=nbits,
+            blue_gain=blue_gain,
+            red_gain=red_gain,
+            black_level=black_level,
+            ccm=ccm,
+            nbits_out=nbits_out,
         )
-        u_in = spherical_wavefront * mask
-
-        # free space propagation to sensor
-        for i, wv in enumerate(color_system.wv):
-            psfs[i], _, _ = angular_spectrum(
-                u_in=u_in[i],
-                wv=wv,
-                d1=sensor.pitch,
-                dz=mask2sensor,
-                dtype=dtype,
-                device=device,
-            )
 
     else:
+        if len(img.shape) == 3 and bgr_input:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        psfs = mask
+    original_dtype = img.dtype
 
-    # -- intensity PSF
-    if is_torch:
-        psf_in = torch.square(torch.abs(psfs))
+    if flip:
+        img = np.flipud(img)
+        img = np.fliplr(img)
+    if flip_ud:
+        img = np.flipud(img)
+    if flip_lr:
+        img = np.fliplr(img)
+
+    if bg is not None:
+
+        # if bg is float vector, turn into int-valued vector
+        if bg.max() <= 1 and img.dtype not in [np.float32, np.float64]:
+            bg = bg * get_max_val(img)
+
+        img = img - bg
+        img = np.clip(img, a_min=0, a_max=img.max())
+
+    if as_4d:
+        if len(img.shape) == 3:
+            img = img[np.newaxis, :, :, :]
+        elif len(img.shape) == 2:
+            img = img[np.newaxis, :, :, np.newaxis]
+
+    if downsample is not None or shape is not None:
+        if downsample is not None:
+            factor = 1 / downsample
+        else:
+            factor = None
+        img = resize(img, factor=factor, shape=shape)
+
+    if return_float:
+        if dtype is None:
+            dtype = np.float32
+        assert dtype == np.float32 or dtype == np.float64
+        img = img.astype(dtype)
+        if normalize:
+            img /= img.max()
+
     else:
-        psf_in = np.square(np.abs(psfs))
+        if dtype is None:
+            dtype = original_dtype
+        img = img.astype(dtype)
 
-    return psf_in
+    if verbose:
+        print_image_info(img)
+
+    return img
+
+
+def get_max_val(img, nbits=None):
+    """
+    For uint image.
+
+    Parameters
+    ----------
+    img : :py:class:`~numpy.ndarray`
+        Image array.
+    nbits : int, optional
+        Number of bits per pixel. Detect if not provided.
+
+    Returns
+    -------
+    max_val : int
+        Maximum pixel value.
+    """
+    assert img.dtype not in FLOAT_DTYPES
+    if nbits is None:
+        nbits = int(np.ceil(np.log2(img.max())))
+
+    if nbits not in SUPPORTED_BIT_DEPTH:
+        nbits = SUPPORTED_BIT_DEPTH[nbits < SUPPORTED_BIT_DEPTH][0]
+    max_val = 2**nbits - 1
+    if img.max() > max_val:
+        new_nbit = int(np.ceil(np.log2(img.max())))
+        print(f"Detected pixel value larger than {nbits}-bit range, using {new_nbit}-bit range.")
+        max_val = 2**new_nbit - 1
+    return max_val
+
+
+def bayer2rgb_cc(
+    img,
+    nbits,
+    down=None,
+    blue_gain=None,
+    red_gain=None,
+    black_level=RPI_HQ_CAMERA_BLACK_LEVEL,
+    ccm=RPI_HQ_CAMERA_CCM_MATRIX,
+    nbits_out=None,
+):
+    """
+    Convert raw Bayer data to RGB with the following steps:
+
+    #. Demosaic with bi-linear interpolation, mapping the Bayer array to RGB.
+    #. Black level removal.
+    #. White balancing, applying gains to red and blue channels.
+    #. Color correction matrix.
+    #. Clip.
+
+    Parameters
+    ----------
+    img : :py:class:`~numpy.ndarray`
+        2D Bayer data to convert to RGB.
+    nbits : int
+        Bit depth of input data.
+    blue_gain : float
+        Blue gain.
+    red_gain : float
+        Red gain.
+    black_level : float
+        Black level. Default is to use that of Raspberry Pi HQ camera.
+    ccm : :py:class:`~numpy.ndarray`
+        Color correction matrix. Default is to use that of Raspberry Pi HQ camera.
+    nbits_out : int
+        Output bit depth. Default is to use that of input.
+
+    Returns
+    -------
+    rgb : :py:class:`~numpy.ndarray`
+        RGB data.
+    """
+    assert len(img.shape) == 2, img.shape
+    if nbits_out is None:
+        nbits_out = nbits
+    if nbits_out > 8:
+        dtype = np.uint16
+    else:
+        dtype = np.uint8
+
+    # demosaic Bayer data
+    img = cv2.cvtColor(img, cv2.COLOR_BayerRG2RGB)
+
+    # downsample
+    if down is not None:
+        img = resize(img[None, ...], factor=1 / down, interpolation=cv2.INTER_CUBIC)[0]
+
+    # correction
+    img = img - black_level
+    if red_gain:
+        img[:, :, 0] *= red_gain
+    if blue_gain:
+        img[:, :, 2] *= blue_gain
+    img = img / (2**nbits - 1 - black_level)
+    img[img > 1] = 1
+
+    img = (img.reshape(-1, 3, order="F") @ ccm.T).reshape(img.shape, order="F")
+    img[img < 0] = 0
+    img[img > 1] = 1
+    return (img * (2**nbits_out - 1)).astype(dtype)
+
+
+def print_image_info(img):
+    """
+    Print dimensions, data type, max, min, mean.
+    """
+    print("dimensions : {}".format(img.shape))
+    print("data type : {}".format(img.dtype))
+    print("max  : {}".format(img.max()))
+    print("min  : {}".format(img.min()))
+    print("mean : {}".format(img.mean()))
+
+
+def resize(img, factor=None, shape=None, interpolation=cv2.INTER_CUBIC):
+    """
+    Resize by given factor.
+
+    Parameters
+    ----------
+    img : :py:class:`~numpy.ndarray`
+        Image to downsample
+    factor : int or float
+        Resizing factor.
+    shape : tuple
+        Shape to copy ([depth,] height, width, color). If provided, (height, width) is used.
+    interpolation : OpenCV interpolation method
+        See https://docs.opencv.org/2.4/modules/imgproc/doc/geometric_transformations.html#cv2.resize
+
+    Returns
+    -------
+    img : :py:class:`~numpy.ndarray`
+        Resized image.
+    """
+    min_val = img.min()
+    max_val = img.max()
+    img_shape = np.array(img.shape)[-3:-1]
+
+    assert not ((factor is None) and (shape is None)), "Must specify either factor or shape"
+    new_shape = tuple(img_shape * factor) if shape is None else shape[-3:-1]
+    new_shape = [int(i) for i in new_shape]
+
+    if np.array_equal(img_shape, new_shape):
+        return img
+
+    if torch_available:
+        # torch resize expects an input of form [color, depth, width, height]
+        tmp = np.moveaxis(img, -1, 0)
+        tmp = torch.from_numpy(tmp.copy())
+        resized = tf.Resize(size=new_shape, antialias=True)(tmp).numpy()
+        resized = np.moveaxis(resized, 0, -1)
+
+    else:
+        resized = np.array(
+            [
+                cv2.resize(img[i], dsize=tuple(new_shape[::-1]), interpolation=interpolation)
+                for i in range(img.shape[-4])
+            ]
+        )
+        # OpenCV discards channel dimension if it is 1, put it back
+        if len(resized.shape) == 3:
+            # resized = resized[:, :, :, np.newaxis]
+            resized = np.expand_dims(resized, axis=-1)
+
+    return np.clip(resized, min_val, max_val)
+
+
+def get_ctypes(dtype, is_torch):
+    if not is_torch:
+        if dtype == np.float32 or dtype == np.complex64:
+            return np.complex64, np.complex64
+        elif dtype == np.float64 or dtype == np.complex128:
+            return np.complex128, np.complex128
+        else:
+            raise ValueError("Unexpected dtype: ", dtype)
+    else:
+        import torch
+
+        if dtype == np.float32 or dtype == np.complex64:
+            return torch.complex64, np.complex64
+        elif dtype == np.float64 or dtype == np.complex128:
+            return torch.complex128, np.complex128
+        elif dtype == torch.float32 or dtype == torch.complex64:
+            return torch.complex64, np.complex64
+        elif dtype == torch.float64 or dtype == torch.complex128:
+            return torch.complex128, np.complex128
+        else:
+            raise ValueError("Unexpected dtype: ", dtype)
+        
