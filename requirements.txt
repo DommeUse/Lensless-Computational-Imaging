@@ -13,6 +13,9 @@ wandb
 comet_ml
 hydra-core
 wget
+SLMcontroller
+cv2
+waveprop
 
 black
 isort
