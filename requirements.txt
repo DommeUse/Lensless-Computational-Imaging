@@ -14,7 +14,7 @@ comet_ml
 hydra-core
 wget
 SLMcontroller
-cv2
+opencv-python
 waveprop
 
 black
