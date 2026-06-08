@@ -14,12 +14,11 @@ def collate_fn(dataset_items: list[dict]):
             of the tensors.
     """
 
-    result_batch = {}
-
-    # example of collate_fn
-    result_batch["img"] = torch.cat(
-        [elem["img"].unsqueeze(0) for elem in dataset_items], dim=0
-    )
-    result_batch["labels"] = torch.tensor([elem["labels"] for elem in dataset_items])
+    result_batch = {
+        "lensless": torch.stack([x["lensless"] for x in dataset_items]),
+        "psf": torch.stack([x["psf"] for x in dataset_items]),
+        "lensed": torch.stack([x["lensed"] for x in dataset_items]),
+        "id": [x["id"] for x in dataset_items],
+    }
 
     return result_batch

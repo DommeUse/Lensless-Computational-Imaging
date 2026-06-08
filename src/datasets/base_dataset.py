@@ -34,6 +34,11 @@ class BaseDataset(Dataset):
             instance_transforms (dict[Callable] | None): transforms that
                 should be applied on the instance. Depend on the
                 tensor name.
+        if data_dir is None:
+            data_dir = ROOT_PATH / "data" / "datasets" / "librispeech"
+            data_dir.mkdir(exist_ok = True, parents = True)
+
+        self._data_dir = Path(data_dir)
         """
         self._assert_index_is_valid(index)
 
@@ -170,8 +175,10 @@ class BaseDataset(Dataset):
                 random package with seed 42.
         """
         if shuffle_index:
-            index = index.shuffle(seed=42)
+            random.seed(42)
+            random.shuffle(index)
 
         if limit is not None:
-            index = index.select(range(limit))
+            index = index[:limit]
+            
         return index
