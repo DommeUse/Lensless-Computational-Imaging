@@ -56,6 +56,6 @@ for ax in axes:
     ax.axis("off")
 
 fig.tight_layout()
-fig.savefig("tmp/dataset_check.png", dpi = 120)
+fig.savefig("dataset_check.png", dpi = 120)
 
-print("Successfully saved -> tmp/dataset_check.png")
+print("Successfully saved -> dataset_check.png")
