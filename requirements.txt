@@ -13,10 +13,11 @@ wandb
 comet_ml
 hydra-core
 wget
-SLMcontroller
 opencv-python
 waveprop
 
 black
 isort
 pre-commit
+
+slm_controller @ git+https://github.com/ebezzam/slm-controller.git
