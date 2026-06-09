@@ -29,7 +29,7 @@ for key in ["lensless", "psf", "lensed"]:
     print(f"{key} shape = {tuple(t.shape)}, dtype = {t.dtype}")
 
 # --- ROI check ---
-roi = get_roi(item["lensed"])
+roi = get_roi(item["lensed"].permute(1, 2, 0))
 print(f"lensed {tuple(item['lensed'].shape)} -> roi {tuple(roi.shape)}")
 
 # --- batching ---

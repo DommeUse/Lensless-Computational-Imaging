@@ -36,14 +36,25 @@ class MirflickrDataset(BaseDataset):
         )
 
         result = {
-            "lensed": lensed,
-            "lensless": lensless,
-            "psf": psf,
+            "lensed": self._to_chw(lensed),
+            "lensless": self._to_chw(lensless),
+            "psf": self._to_chw(psf),
             "id": element["id"]
         }
 
         return self.preprocess_data(result)
     
+    @staticmethod
+    def _to_chw(x):
+        x = torch.as_tensor(x, dtype = torch.float32)
+
+        if x.dim() == 4 and x.shape[0] == 1:
+            x = x.squeeze(0)
+        if x.dim() == 3 and x.shape[-1] in (1, 3):
+            x = x.permute(2, 0, 1)
+
+        return x.contiguous()
+
     @staticmethod
     def _assert_index_is_valid(index):
         for element in index:
