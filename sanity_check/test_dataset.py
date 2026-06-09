@@ -41,6 +41,7 @@ print(f"ids = {batch['id']}")
 
 # --- visualization ---
 psf = item["psf"]
+psf /= psf.abs().max()
 
 fig, axes = plt.subplots(1, 3, figsize = (12, 4))
 axes[0].imshow(to_hwc(item["lensless"]))
