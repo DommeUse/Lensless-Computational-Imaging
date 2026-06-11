@@ -7,9 +7,14 @@ from src.datasets.collate import collate_fn
 from src.datasets.mirflickr_dataset import MirflickrDataset
 from lensless_helpers.preprocessor import get_roi
 
+from pathlib import Path
+
 SPLIT = "test"
 LIMIT = 4
 BATCH_SIZE = 2
+
+OUT_DIR = Path(__file__).resolve().parent / "outputs"
+OUT_DIR.mkdir(parents = True, exist_ok = True)
 
 
 def to_hwc(img):
@@ -57,6 +62,6 @@ for ax in axes:
     ax.axis("off")
 
 fig.tight_layout()
-fig.savefig("dataset_check.png", dpi = 120)
+fig.savefig(OUT_DIR / "dataset_check.png", dpi = 120)
 
-print("Successfully saved -> dataset_check.png")
+print(f"Successfully saved -> {OUT_DIR / 'dataset_check.png'}")
