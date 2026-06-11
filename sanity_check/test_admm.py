@@ -43,7 +43,7 @@ rhs = torch.sum(a * Ht(b, ops["P"]))
 print("H test:")
 print(f"lhs = {lhs} | rhs = {rhs} | diff = {torch.abs(lhs - rhs)}")
 
-a = torch.randn(2, 1, 3, padded_h, padded_w, device = DEVICE)
+b = torch.randn(2, 1, 3, padded_h, padded_w, device = DEVICE)
 
 lhs = torch.sum(Psi(a) * b)
 rhs = torch.sum(a * Psit(b))
