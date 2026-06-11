@@ -53,7 +53,7 @@ class ADMM(nn.Module):
         padded_h, padded_w = lensless.shape[-2] * 2, lensless.shape[-1] * 2
         padded_psf = decrop(psf, padded_h, padded_w)
 
-        P = torch.fft.rfft2(padded_psf)
+        P = torch.fft.rfft2(torch.fft.ifftshift(padded_psf, dim = (-2, -1)))
 
         shift = torch.zeros_like(padded_psf)
         shift[..., 0, 0] = 1.0
