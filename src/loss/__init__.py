@@ -1,1 +1,1 @@
-from src.loss.ce_loss import CrossEntropyLoss
+from src.loss.lensless_loss import LenslessLoss
