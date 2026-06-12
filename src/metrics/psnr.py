@@ -9,7 +9,7 @@ class PSNRMetric(BaseMetric):
         if device == "auto":
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        self.metric = PeakSignalNoiseRatio(data_range = (0, 1), reduction = "mean").to(device)
+        self.metric = PeakSignalNoiseRatio(data_range = (0, 1), reduction = "elementwise_mean").to(device)
 
     @torch.no_grad()
     def __call__(self, output, lensed, **kwargs):
