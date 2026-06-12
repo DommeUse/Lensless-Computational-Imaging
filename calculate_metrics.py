@@ -20,11 +20,12 @@ warnings.filterwarnings("ignore", category=UserWarning)
 def main(config):
     project_config = OmegaConf.to_container(config)
 
+    logger = logging.getLogger("eval")
     writer = None
     if config.get("writer") is not None:
         try:
-            logger = logging.getLogger("eval")
             writer = instantiate(config.writer, logger, project_config)
+            writer.set_step(0, mode = "test")
         except Exception as e:
             writer = None
 
@@ -50,7 +51,7 @@ def main(config):
     checkpoint_path = config.get("from_pretrained", None)
     if checkpoint_path is not None:
         checkpoint = torch.load(checkpoint_path, map_location = device, weights_only = False)
-        model.load_state_dict(checkpoint["model_state_dict"])
+        model.load_state_dict(checkpoint["state_dict"])
 
     model.eval()
 
@@ -68,20 +69,17 @@ def main(config):
 
             if writer is not None and batch_idx == 0:
                 for i in range(min(n_log_images, batch["output"].shape[0])):
-                    writer.log_image(
+                    writer.add_image(
                         f"test_lensless_{i}",
-                        batch["lensless"][i].cpu().permute(1, 2, 0).numpy(),
-                        step = 0
+                        batch["lensless"][i].cpu().permute(1, 2, 0).numpy()
                     )
-                    writer.log_image(
+                    writer.add_image(
                         f"test_lensed_{i}",
-                        batch["lensed"][i].cpu().permute(1, 2, 0).numpy(),
-                        step = 0
+                        batch["lensed"][i].cpu().permute(1, 2, 0).numpy()
                     )
-                    writer.log_image(
+                    writer.add_image(
                         f"test_reconstruction_{i}",
-                        batch["output"][i].cpu().permute(1, 2, 0).numpy(),
-                        step = 0
+                        batch["output"][i].cpu().permute(1, 2, 0).numpy()
                     )
 
             batch["output"] = crop_roi(batch["output"])
