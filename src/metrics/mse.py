@@ -13,5 +13,5 @@ class MSEMetric(BaseMetric):
 
     @torch.no_grad()
     def __call__(self, output, lensed, **kwargs):
-        return self.metric(output, lensed).item()
+        return self.metric(output.contiguous(), lensed.contiguous()).item()
         
