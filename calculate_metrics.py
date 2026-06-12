@@ -30,6 +30,10 @@ def to_PIL(img, stretch = True):
     img = np.transpose(img, (1, 2, 0))
     return img
 
+def normalize_img(img):
+    mn = img.amin(dim = (-3, -2, -1), keepdim = True)
+    mx = img.amax(dim = (-3, -2, -1), keepdim = True)
+    return (img - mn) / (mx - mn + 1e-8)
 
 @hydra.main(version_base=None, config_path="src/configs", config_name="admm100")
 def main(config):
@@ -98,7 +102,7 @@ def main(config):
                         to_PIL(batch["output"][i], stretch = False)
                     )
 
-            batch["output"] = crop_roi(batch["output"])
+            batch["output"] = normalize_img(crop_roi(batch["output"]))
             batch["lensed"] = crop_roi(batch["lensed"])
 
             for met in metrics:
