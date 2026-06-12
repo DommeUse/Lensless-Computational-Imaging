@@ -5,3 +5,7 @@ defaults:
   - dataloader: main
   - _self_
 device: auto
+
+trainer:
+  device_tensors: ["lensless", "psf", "lensed"]
+  from_pretrained: null
