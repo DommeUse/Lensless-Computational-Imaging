@@ -3,6 +3,7 @@ defaults:
   - metrics: lensless
   - datasets: mirflickr
   - dataloader: main
+  - writer: cometml
   - _self_
 device: auto
 n_log_images: 3
