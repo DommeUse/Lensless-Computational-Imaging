@@ -42,6 +42,7 @@ def main(config):
             writer = instantiate(config.writer, logger, project_config)
             writer.set_step(0, mode = "test")
         except Exception as e:
+            logger.warning(f"Failed to initialize writer: {e}")
             writer = None
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
