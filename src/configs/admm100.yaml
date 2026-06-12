@@ -5,6 +5,7 @@ defaults:
   - dataloader: main
   - _self_
 device: auto
+n_log_images: 3
 
 trainer:
   device_tensors: ["lensless", "psf", "lensed"]
