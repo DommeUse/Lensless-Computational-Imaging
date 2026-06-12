@@ -1,6 +1,0 @@
-test:
-  _target_: src.datasets.HFDataset
-  dataset_name: "ylecun/mnist"
-  image_column: "image"
-  split: "test"
-  instance_transforms: ${transforms.instance_transforms.inference}
