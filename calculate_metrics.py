@@ -21,6 +21,8 @@ def to_PIL(img, stretch = True):
     img = img.cpu().numpy()
     if stretch:
         img = (img - img.min()) / (img.max() - img.min() + 1e-8)
+    else:
+        img = np.clip(img, 0, 1)
     img = (img * 255).astype(np.uint8)
     img = np.transpose(img, (1, 2, 0))
     return img
@@ -103,7 +105,7 @@ def main(config):
     for name, value in results.items():
         print(f"{name}: {value}")
         if writer is not None:
-            writer.log_metric(name, value, step = 0)
+            writer.add_scalar(name, value)
 
 if __name__ == "__main__":
     main()
