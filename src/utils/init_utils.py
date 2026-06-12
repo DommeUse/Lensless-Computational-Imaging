@@ -8,7 +8,6 @@ import subprocess
 
 import numpy as np
 import torch
-from accelerate.utils import set_seed
 from omegaconf import OmegaConf
 
 from src.logger.logger import setup_logging
