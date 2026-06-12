@@ -1,3 +1,4 @@
+import logging
 import warnings
 
 import hydra
@@ -18,8 +19,14 @@ warnings.filterwarnings("ignore", category=UserWarning)
 @hydra.main(version_base=None, config_path="src/configs", config_name="admm100")
 def main(config):
     project_config = OmegaConf.to_container(config)
-    logger = setup_saving_and_logging(config)
-    writer = instantiate(config.writer, logger, project_config)
+
+    writer = None
+    if config.get("writer") is not None:
+        try:
+            logger = logging.getLogger("eval")
+            writer = instantiate(config.writer, logger, project_config)
+        except Exception as e:
+            writer = None
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if config.get("device", "auto") != "auto":
