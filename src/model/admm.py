@@ -69,7 +69,7 @@ class ADMM(nn.Module):
         }
         
 
-    def forward(self, lensless, psf):
+    def forward(self, lensless, psf, **kwargs):
         ops = self._precompute(lensless, psf)
 
         h, w = lensless.shape[-2:]
