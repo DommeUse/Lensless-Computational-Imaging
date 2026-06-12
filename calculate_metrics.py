@@ -13,7 +13,17 @@ from src.datasets.collate import collate_fn
 
 from lensless_helpers.preprocessor import crop_roi
 
+import numpy as np
+
 warnings.filterwarnings("ignore", category=UserWarning)
+
+def to_PIL(img, stretch = True):
+    img = img.cpu().numpy()
+    if stretch:
+        img = (img - img.min()) / (img.max() - img.min() + 1e-8)
+    img = (img * 255).astype(np.uint8)
+    img = np.transpose(img, (1, 2, 0))
+    return img
 
 
 @hydra.main(version_base=None, config_path="src/configs", config_name="admm100")
@@ -71,15 +81,15 @@ def main(config):
                 for i in range(min(n_log_images, batch["output"].shape[0])):
                     writer.add_image(
                         f"test_lensless_{i}",
-                        batch["lensless"][i].cpu().permute(1, 2, 0).numpy()
+                        to_PIL(batch["lensless"][i], stretch = True)
                     )
                     writer.add_image(
                         f"test_lensed_{i}",
-                        batch["lensed"][i].cpu().permute(1, 2, 0).numpy()
+                        to_PIL(batch["lensed"][i], stretch = False)
                     )
                     writer.add_image(
                         f"test_reconstruction_{i}",
-                        batch["output"][i].cpu().permute(1, 2, 0).numpy()
+                        to_PIL(batch["output"][i], stretch = False)
                     )
 
             batch["output"] = crop_roi(batch["output"])
