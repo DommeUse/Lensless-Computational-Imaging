@@ -1,0 +1,8 @@
+train:
+  _target_: src.datasets.MirFlickrDataset
+  split: "train"
+  limit: null
+test:
+  _target_: src.datasets.MirFlickrDataset
+  split: "test"
+  limit: null
