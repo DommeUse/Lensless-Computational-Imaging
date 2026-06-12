@@ -3,7 +3,7 @@ import torch
 from src.metrics.tracker import MetricTracker
 from src.trainer.base_trainer import BaseTrainer
 
-from lensless_helpers.preprocessor import get_roi
+from lensless_helpers.preprocessor import crop_roi
 
 class Trainer(BaseTrainer):
     """
@@ -37,8 +37,8 @@ class Trainer(BaseTrainer):
         outputs = self.model(**batch)
         batch.update(outputs)
 
-        batch["output"] = get_roi(batch["output"])
-        batch["lensed"] = get_roi(batch["lensed"])
+        batch["output"] = crop_roi(batch["output"])
+        batch["lensed"] = crop_roi(batch["lensed"])
 
         all_losses = self.criterion(**batch)
         batch.update(all_losses)
