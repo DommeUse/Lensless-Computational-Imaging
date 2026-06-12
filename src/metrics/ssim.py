@@ -13,5 +13,5 @@ class SSIMMetric(BaseMetric):
 
     @torch.no_grad()
     def __call__(self, output, lensed, **kwargs):
-        return self.metric(output, lensed).item()
+        return self.metric(output.clamp(0, 1), lensed).item()
         
