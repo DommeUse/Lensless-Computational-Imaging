@@ -17,6 +17,9 @@ import numpy as np
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
+for name in ["httpx", "huggingface_hub", "comet_ml", "urllib3"]:
+    logging.getLogger(name).setLevel(logging.WARNING)
+
 def to_PIL(img, stretch = True):
     img = img.cpu().numpy()
     if stretch:
