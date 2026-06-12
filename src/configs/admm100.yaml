@@ -1,0 +1,7 @@
+defaults:
+  - model: admm100
+  - metrics: lensless
+  - datasets: mirflickr
+  - dataloader: main
+  - _self_
+device: auto
