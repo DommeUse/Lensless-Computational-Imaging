@@ -7,7 +7,7 @@ defaults:
   - _self_
 device: auto
 n_log_images: 3
+from_pretrained: null
 
 trainer:
   device_tensors: ["lensless", "psf", "lensed"]
-  from_pretrained: null
