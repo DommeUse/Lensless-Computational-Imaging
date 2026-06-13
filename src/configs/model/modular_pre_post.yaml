@@ -1,0 +1,13 @@
+_target_: src.model.ModularReconstruction
+admm: 
+  _target_: src.model.ADMM
+  n_iters: 5
+  learnable: true
+pre:
+  _target_: src.model.DRUNet
+  in_channels: 3
+  hidden_channels: 24
+post: 
+  _target_: src.model.DRUNet
+  in_channels: 3
+  hidden_channels: 24
