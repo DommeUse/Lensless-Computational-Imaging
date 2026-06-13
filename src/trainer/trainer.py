@@ -5,6 +5,10 @@ from src.trainer.base_trainer import BaseTrainer
 
 from lensless_helpers.preprocessor import crop_roi
 
+def normalize_img(img):
+    mn = img.amin(dim = (-3, -2, -1), keepdim = True)
+    mx = img.amax(dim = (-3, -2, -1), keepdim = True)
+    return (img - mn) / (mx - mn + 1e-8)
 class Trainer(BaseTrainer):
     """
     Trainer class. Defines the logic of batch logging and processing.
@@ -55,6 +59,8 @@ class Trainer(BaseTrainer):
         for loss_name in self.config.writer.loss_names:
             if loss_name in batch:
                 metrics.update(loss_name, batch[loss_name].item())
+
+        batch["output"] = normalize_img(batch["output"])
 
         for met in metric_funcs:
             metrics.update(met.name, met(**batch))
