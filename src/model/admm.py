@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch
+import math
 
 from src.model.admm_utils import crop, decrop, H, Ht, Psi, Psit, soft_thresholding
 
@@ -11,18 +12,18 @@ class ADMM(nn.Module):
         self.learnable = learnable
 
         if learnable:
-            self.mu1 = nn.Parameter(torch.ones(n_iters) * mu_init)
-            self.mu2 = nn.Parameter(torch.ones(n_iters) * mu_init)
-            self.mu3 = nn.Parameter(torch.ones(n_iters) * mu_init)
-            self.tau = nn.Parameter(torch.ones(n_iters) * tau_init)
+            self.log_mu1 = nn.Parameter(torch.ones(n_iters) * math.log(mu_init))
+            self.log_mu2 = nn.Parameter(torch.ones(n_iters) * math.log(mu_init))
+            self.log_mu3 = nn.Parameter(torch.ones(n_iters) * math.log(mu_init))
+            self.log_tau = nn.Parameter(torch.ones(n_iters) * math.log(tau_init))
         else:
-            self.register_buffer('mu1', torch.ones(n_iters) * mu_init)
-            self.register_buffer('mu2', torch.ones(n_iters) * mu_init)
-            self.register_buffer('mu3', torch.ones(n_iters) * mu_init)
-            self.register_buffer('tau', torch.ones(n_iters) * tau_init)
+            self.register_buffer('log_mu1', torch.ones(n_iters) * math.log(mu_init))
+            self.register_buffer('log_mu2', torch.ones(n_iters) * math.log(mu_init))
+            self.register_buffer('log_mu3', torch.ones(n_iters) * math.log(mu_init))
+            self.register_buffer('log_tau', torch.ones(n_iters) * math.log(tau_init))
 
     def _get_params(self, step):
-        mu1, mu2, mu3, tau = self.mu1[step], self.mu2[step], self.mu3[step], self.tau[step]
+        mu1, mu2, mu3, tau = self.log_mu1[step].exp(), self.log_mu2[step].exp(), self.log_mu3[step].exp(), self.log_tau[step].exp()
         threshold = tau if self.learnable else tau / mu2
         return mu1, mu2, mu3, threshold
 
