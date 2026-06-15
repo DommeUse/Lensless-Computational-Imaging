@@ -67,7 +67,7 @@ def crop_roi(image):
     ]
 
 
-def get_dataset_object(lensed, lensless, mask_vals):
+def get_dataset_object(lensed, lensless, mask_vals, psf = None):
     lensed = convert_image_to_float(force_rgb(np.array(lensed)))
     lensless = convert_image_to_float(force_rgb(np.array(lensless)))
 
@@ -77,6 +77,7 @@ def get_dataset_object(lensed, lensless, mask_vals):
     lensed = get_cropped_lensed(lensed, lensless)
     lensed = torch.from_numpy(lensed)
 
-    psf = simulate_psf_from_mask(mask_vals)
+    if psf is None:
+        psf = simulate_psf_from_mask(mask_vals)
     return lensed, lensless, psf
     

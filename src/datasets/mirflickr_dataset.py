@@ -5,6 +5,7 @@ import torch
 
 from src.datasets.base_dataset import BaseDataset
 from lensless_helpers.preprocessor import get_dataset_object
+from lensless_helpers.psf import simulate_psf_from_mask
 
 REPO_URL = "bezzam/DigiCam-Mirflickr-MultiMask-10K"
 
@@ -12,6 +13,7 @@ class MirflickrDataset(BaseDataset):
     def __init__(self, split, limit = None, *args, **kwargs):
         self.hf_dataset = load_dataset(REPO_URL, split = split)
         self.mask_cache = {}
+        self.psf_cache = {}
 
         index = [{"id" : i, "mask_label": self.hf_dataset[i]["mask_label"]} for i in range(len(self.hf_dataset))]
 
@@ -23,16 +25,23 @@ class MirflickrDataset(BaseDataset):
             self.mask_cache[mask_label] = np.load(path)
         return self.mask_cache[mask_label]
 
+    def _get_psf(self, mask_label):
+        if mask_label not in self.psf_cache:
+            self.psf_cache[mask_label] = simulate_psf_from_mask(self._get_mask(mask_label))
+        return self.psf_cache[mask_label]
+
+
     def __getitem__(self, ind):
         element = self._index[ind]
         mask_label = element["mask_label"]
         row = self.hf_dataset[element["id"]]
 
-        mask = self._get_mask(mask_label)
+        psf = self._get_psf(mask_label)
         lensed, lensless, psf = get_dataset_object(
             row["lensed"], 
             row["lensless"], 
-            mask
+            None,
+            psf = psf
         )
 
         result = {
