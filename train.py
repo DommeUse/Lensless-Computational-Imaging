@@ -11,6 +11,10 @@ from src.utils.init_utils import set_random_seed, setup_saving_and_logging
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
+import logging
+
+for name in ["httpx", "huggingface_hub", "urllib3"]:
+    logging.getLogger(name).setLevel(logging.WARNING)
 
 @hydra.main(version_base=None, config_path="src/configs", config_name="admm_unrolled")
 def main(config):
