@@ -11,7 +11,7 @@ class ModularReconstruction(nn.Module):
         if self.pre is not None:
             lensless = self.pre(lensless)
 
-        recon = self.admm(lensless, psf)["output"]
+        recon = self.admm(lensless, psf, **kwargs)["output"]
 
         if self.post is not None:
             recon = self.post(recon)

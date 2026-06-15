@@ -11,6 +11,8 @@ class ADMM(nn.Module):
         self.n_iters = n_iters
         self.learnable = learnable
 
+        self._psf_cache = {}
+
         if learnable:
             self.log_mu1 = nn.Parameter(torch.ones(n_iters) * math.log(mu_init))
             self.log_mu2 = nn.Parameter(torch.ones(n_iters) * math.log(mu_init))
@@ -50,28 +52,43 @@ class ADMM(nn.Module):
             "alpha3": alpha3_new
         }
 
-    def _precompute(self, lensless, psf):
+    def _precompute(self, lensless, psf, mask_label = None):
         padded_h, padded_w = lensless.shape[-2] * 2, lensless.shape[-1] * 2
-        padded_psf = decrop(psf, padded_h, padded_w)
 
-        P = torch.fft.rfft2(torch.fft.ifftshift(padded_psf, dim = (-2, -1)))
+        static_ops = None
+        key = (mask_label, padded_h, padded_w)
 
-        shift = torch.zeros_like(padded_psf)
-        shift[..., 0, 0] = 1.0
-        shift_x_fft = torch.fft.rfft2(torch.roll(shift, shifts = -1, dims = -1) - shift)
-        shift_y_ftt = torch.fft.rfft2(torch.roll(shift, shifts = -1, dims = -2) - shift)
+        if key not in self._psf_cache:
 
-        return {
-            "P" : P,
-            "P_norm": P.abs() ** 2,
-            "Psi_gram_norm": shift_x_fft.abs() ** 2 + shift_y_ftt.abs() ** 2,
-            "CtC": decrop(torch.ones_like(psf), padded_h, padded_w),
-            "Ctb": decrop(lensless, padded_h, padded_w)
-        }
+            padded_psf = decrop(psf, padded_h, padded_w)
+
+            P = torch.fft.rfft2(torch.fft.ifftshift(padded_psf, dim = (-2, -1)))
+
+            shift = torch.zeros_like(padded_psf)
+            shift[..., 0, 0] = 1.0
+            shift_x_fft = torch.fft.rfft2(torch.roll(shift, shifts = -1, dims = -1) - shift)
+            shift_y_ftt = torch.fft.rfft2(torch.roll(shift, shifts = -1, dims = -2) - shift)
+
+            static_ops = {
+                 "P" : P,
+                "P_norm": P.abs() ** 2,
+                "Psi_gram_norm": shift_x_fft.abs() ** 2 + shift_y_ftt.abs() ** 2,
+                "CtC": decrop(torch.ones_like(psf), padded_h, padded_w),
+            }
+
+            self._psf_cache[key] = static_ops
+        else:
+            static_ops = self._psf_cache[key]
+
+        static_ops["Ctb"] = decrop(lensless, padded_h, padded_w)
+
+        return static_ops
         
 
     def forward(self, lensless, psf, **kwargs):
-        ops = self._precompute(lensless, psf)
+        mask_label = kwargs.get("mask_label", None)
+
+        ops = self._precompute(lensless, psf, mask_label = mask_label)
 
         h, w = lensless.shape[-2:]
         padded_h, padded_w = h * 2, w * 2

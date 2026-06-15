@@ -39,7 +39,8 @@ class MirflickrDataset(BaseDataset):
             "lensed": self._to_chw(lensed),
             "lensless": self._to_chw(lensless),
             "psf": self._to_chw(psf),
-            "id": element["id"]
+            "id": element["id"],
+            "mask_label": mask_label
         }
 
         return self.preprocess_data(result)
