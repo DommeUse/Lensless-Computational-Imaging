@@ -3,6 +3,8 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+import torch
+
 
 class CometMLWriter:
     """
@@ -49,6 +51,9 @@ class CometMLWriter:
                 resume = True
 
             if resume:
+                checkpoint = torch.load(project_config["trainer"].get("resume_from"), weights_only = False)
+                self.run_id = checkpoint['config']['writer']['run_id']
+                
                 if mode == "offline":
                     exp_class = comet_ml.ExistingOfflineExperiment
                 else:
