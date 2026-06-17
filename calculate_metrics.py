@@ -108,12 +108,24 @@ def main(config):
             for met in metrics:
                 tracker.update(met.name, met(**batch), n=batch["output"].shape[0])
 
+    for name in ["admm", "pre", "post"]:
+        sub = getattr(model, name, None)
+        if sub is not None:
+            n_params = sum(p.numel() for p in sub.parameters())
+            if n_params > 0:
+                tracker.update(f"n_params_{name}", n_params, n = 1)
+
     results = tracker.result()
     print("Metrics on test set:")
     for name, value in results.items():
         print(f"{name}: {value}")
         if writer is not None:
             writer.add_scalar(name, value)
+
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print("Number of parameters:")
+    print(f"total = {total} | trainable = {trainable}")
 
 if __name__ == "__main__":
     main()
