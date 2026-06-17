@@ -55,7 +55,8 @@ def main(config):
 
     datasets = instantiate(config.datasets)
     metrics = instantiate(config.metrics)["inference"]
-    tracker = MetricTracker(*[met.name for met in metrics])
+
+    tracker = MetricTracker(*([met.name for met in metrics] + ["n_params_admm", "n_params_pre", "n_params_post"]))
 
     dataloader = DataLoader(
         datasets["test"],
@@ -112,8 +113,7 @@ def main(config):
         sub = getattr(model, name, None)
         if sub is not None:
             n_params = sum(p.numel() for p in sub.parameters())
-            if n_params > 0:
-                tracker.update(f"n_params_{name}", n_params, n = 1)
+            tracker.update(f"n_params_{name}", n_params, n = 1)
 
     results = tracker.result()
     print("Metrics on test set:")
