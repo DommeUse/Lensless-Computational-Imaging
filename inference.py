@@ -1,98 +1,82 @@
+import logging
 import warnings
-from datetime import timedelta
+from src.utils.io_utils import ROOT_PATH
 
 import hydra
 import torch
-from accelerate import (
-    Accelerator,
-    DistributedDataParallelKwargs,
-    InitProcessGroupKwargs,
-)
+import numpy as np
 from hydra.utils import instantiate
-from transformers import AutoModel
+from torch.utils.data import DataLoader
 
-from src.datasets.data_utils import get_dataloaders
-from src.model import register_models
-from src.trainer import Inferencer
-from src.utils.init_utils import set_random_seed
-from src.utils.io_utils import ROOT_PATH
+from PIL import Image
 
-warnings.filterwarnings("ignore", category=UserWarning)
+from src.datasets.collate import inference_collate_fn
 
+warnings.filterwarnings("ignore", category = UserWarning)
+
+for name in ["httpx", "huggingface_hub", "urllib3", "comet_ml", "datasets"]:
+    logging.getLogger(name).setLevel(logging.WARNING)
+
+def normalize_img(img):
+    mn = img.amin(dim = (-3, -2, -1), keepdim = True)
+    mx = img.amax(dim = (-3, -2, -1), keepdim = True)
+    return (img - mn) / (mx - mn + 1e-8)
 
 @hydra.main(version_base=None, config_path="src/configs", config_name="inference")
 def main(config):
     """
-    Main script for inference. Instantiates the model, metrics, and
-    dataloaders. Runs Inferencer to calculate metrics and (or)
-    save predictions.
+    Main script for inference. Instantiates the model and
+    dataloaders. Runs Inferencer to save predictions.
 
     Args:
         config (DictConfig): hydra experiment config.
     """
-    if config.inferencer.device == "auto":
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    else:
-        device = config.inferencer.device
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if config.get("device", "auto") != "auto":
+        device = config.device
 
-    kwargs = [
-        InitProcessGroupKwargs(timeout=timedelta(seconds=3600)),
-        DistributedDataParallelKwargs(find_unused_parameters=True),
-    ]
-    accelerator = Accelerator(
-        device_placement=False,  # we set to False for precise control of devices in batches
-        cpu=device == "cpu",
-        kwargs_handlers=kwargs,
-    )
-    device = accelerator.device
-    set_random_seed(config.inferencer.seed)
+    model = instantiate(config.model).to(device)
 
-    # setup data_loader instances
-    # batch_transforms should be put on device
-    dataloaders, batch_transforms = get_dataloaders(config, accelerator, None)
+    assert config.get("from_pretrained", None) is not None, "Provide model checkpoint."
 
-    # enable automodel and autoconfig
-    register_models()
-    # build model architecture, then print to console
-    assert config.inferencer.from_pretrained is not None, "Provide model checkpoint."
-    if accelerator.is_main_process:
-        print(f"Loading model weights from: {config.inferencer.from_pretrained} ...")
-    model = AutoModel.from_pretrained(config.inferencer.from_pretrained)
-    model.to(device)
+    checkpoint = config.get("from_pretrained", None)
+    state = torch.load(checkpoint, map_location=device, weights_only=False)
+    model.load_state_dict(state["state_dict"] if "state_dict" in state else state)
 
-    if accelerator.is_main_process:
-        print(model)
+    print(f"Loaded weights from {checkpoint}")
 
-    # get metrics
-    metrics = instantiate(config.metrics)
+    model.eval()
 
-    # Prepare objects. Dataloaders are already prepared
-    model = accelerator.prepare(model)
+    dataset = instantiate(config.dataset)
+    if isinstance(dataset, dict):
+        dataset = dataset[config.get("partition", "test")]
 
-    # save_path for model predictions
-    # we assume all nodes share the filesystem
-    save_path = ROOT_PATH / "data" / "saved" / config.inferencer.save_path
-    if accelerator.is_main_process:
-        save_path.mkdir(exist_ok=True, parents=True)
-
-    inferencer = Inferencer(
-        model=model,
-        config=config,
-        accelerator=accelerator,
-        device=device,
-        dataloaders=dataloaders,
-        batch_transforms=batch_transforms,
-        save_path=save_path,
-        metrics=metrics,
+    loader = DataLoader(
+        dataset,
+        batch_size = config.dataloader.batch_size,
+        num_workers = config.dataloader.get("num_workers", 2),
+        collate_fn = inference_collate_fn,
+        shuffle = False,
     )
 
-    logs = inferencer.run_inference()
+    save_dir = ROOT_PATH / config.get("save_dir", "reconstructions")
+    save_dir.mkdir(parents = True, exist_ok = True)
 
-    if accelerator.is_main_process:
-        for part in logs.keys():
-            for key, value in logs[part].items():
-                full_key = part + "_" + key
-                print(f"    {full_key:15s}: {value}")
+    n = 0
+    with torch.no_grad():
+        for batch in loader:
+            lensless = batch["lensless"].to(device)
+            psf = batch["psf"].to(device)
+ 
+            output = model(lensless = lensless, psf = psf)["output"]
+            output = normalize_img(output).clamp(0, 1).cpu()
+ 
+            for i, img_id in enumerate(batch["id"]):
+                arr = (output[i].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+                Image.fromarray(arr).save(save_dir / f"{img_id}.png")
+                n += 1
+
+    print(f"Saved {n} reconstructions to {save_dir.resolve()}")
 
 
 if __name__ == "__main__":
