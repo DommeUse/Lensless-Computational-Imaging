@@ -52,7 +52,7 @@ class CustomDirDataset(Dataset):
         p = directory / f"{stem}.png"
         return p if p.exists() else None
     
-    def _load_img(path):
+    def _load_img(self, path):
         return np.array(Image.open(path).convert("RGB"))
     
     def _get_psf(self, stem, mask):
