@@ -2,10 +2,17 @@ import logging
 import warnings
 
 import hydra
+from matplotlib.path import Path
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from tqdm import tqdm
+
+import cv2
+from PIL import Image
+
+from lensless_helpers.preprocessor import CROPED_LENSED_SHAPE, crop_roi
+from lensless_helpers.utils import resize
 
 from src.metrics.tracker import MetricTracker
 from torch.utils.data import DataLoader
@@ -35,26 +42,8 @@ def normalize_img(img):
     mx = img.amax(dim = (-3, -2, -1), keepdim = True)
     return (img - mn) / (mx - mn + 1e-8)
 
-@hydra.main(version_base=None, config_path="src/configs", config_name="admm100")
-def main(config):
-    project_config = OmegaConf.to_container(config)
-
-    logger = logging.getLogger("eval")
-    writer = None
-    if config.get("writer") is not None:
-        try:
-            writer = instantiate(config.writer, logger, project_config)
-            writer.set_step(0, mode = "test")
-        except Exception as e:
-            logger.warning(f"Failed to initialize writer: {e}")
-            writer = None
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    if config.get("device", "auto") != "auto":
-        device = config.device
-
+def evaluate_on_split(config, logger, writer, device, metrics):
     datasets = instantiate(config.datasets)
-    metrics = instantiate(config.metrics)["inference"]
 
     tracker = MetricTracker(*([met.name for met in metrics] + ["n_params_admm", "n_params_pre", "n_params_post"]))
 
@@ -126,6 +115,99 @@ def main(config):
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print("Number of parameters:")
     print(f"total = {total} | trainable = {trainable}")
+
+def load_img(path):
+    arr = np.array(Image.open(path).convert("RGB")).astype(np.float32) / 255.0
+    return torch.from_numpy(arr).permute(2, 0, 1)
+ 
+def collect(dir):
+    dir = Path(dir)
+    return {p.stem: p for p in sorted(dir.iterdir()) if p.suffix == ".png"}
+
+def to_roi_pair(recon, gt):
+    recon_roi = normalize_img(crop_roi(recon)).clamp(0, 1)
+ 
+    if gt.shape[-2:] == recon.shape[-2:]:
+        gt_roi = crop_roi(gt)
+    else:
+        gt_np = resize(gt.permute(1, 2, 0).numpy(), shape = CROPED_LENSED_SHAPE, interpolation = cv2.INTER_NEAREST)
+        gt_roi = torch.from_numpy(gt_np).permute(2, 0, 1)
+
+    return recon_roi, gt_roi.clamp(0, 1)
+
+def evaluate_from_dirs(config, logger, writer, device, metrics, gt_dir, recon_dir):
+    gt_dir = Path(gt_dir)
+    
+    tracker = MetricTracker(*[met.name for met in metrics])
+
+    if not gt_dir.is_dir():
+        print(f"No ground-truth directory found!")
+        return
+    
+    recon_files = collect(recon_dir)
+    gt_files = collect(gt_dir)
+    ids = sorted(set(recon_files) & set(gt_files))
+
+    if len(ids) == 0:
+        print(f"No matching files found between {gt_dir} and {recon_dir}")
+        return
+    
+    n_log_images = config.get("n_log_images", 3)
+
+    with torch.no_grad():
+        for k, img_id in enumerate(tqdm(ids, desc = "Calculating metrics")):
+            recon = load_img(recon_files[img_id])
+            gt = load_img(gt_files[img_id])
+ 
+            recon_roi, gt_roi = to_roi_pair(recon, gt)
+            recon_roi = recon_roi.unsqueeze(0).to(device)
+            gt_roi = gt_roi.unsqueeze(0).to(device)
+ 
+            batch = {"output": recon_roi, "lensed": gt_roi}
+ 
+            if writer is not None and k < n_log_images:
+                writer.add_image(f"test_reconstruction_{k}", to_PIL(recon_roi[0], stretch = False))
+                writer.add_image(f"test_lensed_{k}", to_PIL(gt_roi[0], stretch = False))
+ 
+            for met in metrics:
+                tracker.update(met.name, met(**batch), n = batch["output"].shape[0])
+
+    results = tracker.result()
+    print(f"Metrics on {len(ids)} image pairs:")
+    for name, value in results.items():
+        print(f"{name}: {value}")
+        if writer is not None:
+            writer.add_scalar(name, value)
+
+
+
+@hydra.main(version_base=None, config_path="src/configs", config_name="admm100")
+def main(config):
+    project_config = OmegaConf.to_container(config)
+
+    logger = logging.getLogger("eval")
+    writer = None
+    if config.get("writer") is not None:
+        try:
+            writer = instantiate(config.writer, logger, project_config)
+            writer.set_step(0, mode = "test")
+        except Exception as e:
+            logger.warning(f"Failed to initialize writer: {e}")
+            writer = None
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if config.get("device", "auto") != "auto":
+        device = config.device
+
+    metrics = instantiate(config.metrics)["inference"]
+
+    gt_dir = config.get("gt_dir", None)
+    recon_dir = config.get("recon_dir", None)
+
+    if gt_dir is not None and recon_dir is not None:
+        evaluate_from_dirs(config, logger, writer, device, metrics, gt_dir, recon_dir)
+    else:
+        evaluate_on_split(config, logger, writer, device, metrics)
 
 if __name__ == "__main__":
     main()
