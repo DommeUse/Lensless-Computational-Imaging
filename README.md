@@ -28,7 +28,7 @@
 | ModularReconstruction | pre-DRUNet $\rightarrow$ LeADMM (5 итераций) $\rightarrow$ post-DRUNet (`pre`/`post` опциональны, есть эксперименты с рассмотрением их по отдельности) |
 | Loss | `LenslessLoss` $=MSE + LPIPS$ (VGG, `normalize = True`), на ROI кропах |
 | Метрики | PSNR, SSIM, LPIPS, MSE на ROI кропах; выход модели min-max нормируется для выравнивания яркости |
-| Оптимизатор | Adam, lr $= 10^{-4}$ (const), $\beta = (0.9, 0.999)$ - паарметры из статьи Bezzam, lr_sheduler = `ConstantLR` |
+| Оптимизатор | Adam, lr $= 10^{-4}$ (const), $\beta = (0.9, 0.999)$ - параметры из статьи Bezzam, lr_sheduler = `ConstantLR` |
 
 Три пространства изображений: **padded** $760 \times 1014$ (ADMM/FFT), **sensor** $380 \times 507$ (измерение и выход), **ROI** $200 \times 266$(лосс и метрики). PSF симулируется с помощью SLM-маски (библиотека `waveprop`).
 
