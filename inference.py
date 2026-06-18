@@ -47,7 +47,7 @@ def main(config):
 
     model.eval()
 
-    dataset = instantiate(config.dataset)
+    dataset = instantiate(config.datasets)
     if isinstance(dataset, dict):
         dataset = dataset[config.get("partition", "test")]
 
