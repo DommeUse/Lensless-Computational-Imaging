@@ -2,7 +2,7 @@ import logging
 import warnings
 
 import hydra
-from matplotlib.path import Path
+from pathlib import Path
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
