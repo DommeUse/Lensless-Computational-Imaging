@@ -246,13 +246,13 @@ python inference.py --config-name=inference \
 
 > Финальные метрики считаются в [`metrics_notebooks/LenslessMetrics.ipynb`](./metrics_notebooks/LenslessMetrics.ipynb).
 
-| Модель | PSNR $\uparrow$ | SSIM $\uparrow$ | LPIPS $\downarrow$ | MSE $\downarrow$ |
-|---|---|---|---|---|
-| ADMM-100(бейзлайн) | **10.898** | **0.279** | **0.752** | **0.086** |
-| ADMM-Unrolled | **10.997** | **0.176** | **0.753** | **0.089** |
-| Modular Pre | **13.335** | **0.219** | **0.634** | **0.050** |
-| Modular Post | **15.953** | **0.431** | **0.550** | **0.028** |
-| Modular Pre-Post | **16.554** | **0.458** | **0.527** | **0.025** |
+| Модель | PSNR $\uparrow$ | SSIM $\uparrow$ | LPIPS $\downarrow$ | MSE $\downarrow$ | n_params|
+|---|---|---|---|---|---|
+| ADMM-100(бейзлайн) | **10.898** | **0.279** | **0.752** | **0.086** | **0** |
+| ADMM-Unrolled | **10.997** | **0.176** | **0.753** | **0.089** | **20** |
+| Modular Pre | **13.335** | **0.219** | **0.634** | **0.050** | **8.2M** |
+| Modular Post | **15.953** | **0.431** | **0.550** | **0.028** | **8.2M** |
+| Modular Pre-Post | **16.554** | **0.458** | **0.527** | **0.025** | **9.2M** |
 
 Подробное обсуждение результатов и сложностей - в [Report.md](./Report.md).
 
