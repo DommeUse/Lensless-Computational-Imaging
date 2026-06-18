@@ -246,7 +246,7 @@ python inference.py --config-name=inference \
 
 > Финальные метрики считаются в [`metrics_notebooks/LenslessMetrics.ipynb`](./metrics_notebooks/LenslessMetrics.ipynb).
 
-| Модель | PSNR $\uparrow$ | SSIM $\uparrow$ | LPIPS $\downarrow$ | MSE $\downarrow$ | n_params|
+| Модель | PSNR $\uparrow$ | SSIM $\uparrow$ | LPIPS $\downarrow$ | MSE $\downarrow$ | Обучаемых параметров |
 |---|---|---|---|---|---|
 | ADMM-100(бейзлайн) | **10.898** | **0.279** | **0.752** | **0.086** | **0** |
 | ADMM-Unrolled | **10.997** | **0.176** | **0.753** | **0.089** | **20** |
